@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Chess Game</title>
+  
+    <!-- jQuery (required by chessboard.js) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  
+    <!-- Chessboard.js CSS & JS from cdnjs -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+  
+    <!-- Socket.IO (optional: keep CDN for dev) -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  </head>
+  
+<body>
+    <h1>Web Chess Game</h1>
+    <div id="board" style="width: 500px;"></div>
+    <script>
+        const socket = io();
+        const room = 'room1';
+        socket.emit('join', { room });
+        const board = Chessboard('board', {
+            draggable: true,
+            position: 'start',
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+            onDrop: (source, target) => {
+                socket.emit('move', { room, move: source + target });
+            }
+        });
+        socket.on('board_state', fen => board.position(fen));
+        socket.on('invalid_move', () => alert("Invalid move!"));
+    </script>
+</body>
+</html>

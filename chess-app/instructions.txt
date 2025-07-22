@@ -1,0 +1,1 @@
+Before running run.py, start the virtual environment with "source venv/bin/activate"
