@@ -9,24 +9,26 @@ def create_app():
 
     # Secret key
     app.config['SECRET_KEY'] = 'secret!'
-    
-    # PostgreSQL 
-    app.config['SQLALCHEMY_DATABSE_URI'] = 'postgresql://chess_user:Nelson1984.@localhost/chess_capstone'
+
+    # PostgreSQL connection
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chess_user:Amber1984.@localhost/chess_capstone'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     # Initialize database
     db.init_app(app)
 
     with app.app_context():
-        db.create_all() # Create tables if there aren't any
+        db.create_all()  # Create tables if they don’t exist
 
     # Register routes
     from .routes import main
     app.register_blueprint(main)
 
-    # Register SocetIO events
+    # Initialize SocketIO
+    socketio.init_app(app)
+
+    # Register SocketIO events
     from .sockets import register_sockets
     register_sockets(socketio)
-    socketio.init_app(app)
 
     return app
