@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game #{{ game.id }}</title>
+    
+    <!-- jQuery (required by chessboard.js) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    
+    <!-- Chessboard.js CSS & JS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    
+    <!-- Chess.js for move validation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .game-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .board-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .info-section {
+            flex: 1;
+            min-width: 300px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .game-info {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+        }
+        
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        #board {
+            width: 500px;
+            height: 500px;
+        }
+        
+        .game-controls {
+            margin-top: 20px;
+        }
+        
+        .game-controls button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .game-controls button:hover {
+            background-color: #45a049;
+        }
+        
+        .game-controls button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .resign-btn {
+            background-color: #f44336 !important;
+        }
+        
+        .resign-btn:hover {
+            background-color: #da190b !important;
+        }
+        
+        .moves-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .move-pair {
+            margin-bottom: 5px;
+        }
+        
+        .move-number {
+            font-weight: bold;
+            color: #666;
+        }
+        
+        .player-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        
+        .player-white {
+            background-color: #f0f0f0;
+            border: 2px solid #ccc;
+        }
+        
+        .player-black {
+            background-color: #333;
+            color: white;
+            border: 2px solid #666;
+        }
+        
+        .current-turn {
+            border-color: #4CAF50 !important;
+            border-width: 3px !important;
+        }
+        
+        .highlight {
+            background-color: yellow !important;
+            opacity: 0.6;
+        }
+        
+        .possible-move {
+            background-color: #7fc97f !important;
+            opacity: 0.6;
+        }
+        
+        .last-move {
+            background-color: #ffeb3b !important;
+            opacity: 0.8;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #2196F3;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <a href="/" class="back-link">← Back to Home</a>
+    
+    <h1>🏰 Chess Game #{{ game.id }}</h1>
+    
+    <div class="game-container">
+        <!-- Chess Board Section -->
+        <div class="board-section">
+            <div id="board"></div>
+            
+            <div class="game-controls">
+                <button onclick="offerDraw()" id="drawBtn">Offer Draw</button>
+                <button onclick="resignGame()" id="resignBtn" class="resign-btn">Resign</button>
+                <button onclick="leaveGame()" id="leaveBtn">Leave Game</button>
+            </div>
+        </div>
+        
+        <!-- Game Info Section -->
+        <div class="info-section">
+            <div class="game-info">
+                <div class="status" id="gameStatus">Connecting...</div>
+            </div>
+            
+            <!-- Player Information -->
+            <div id="playerWhite" class="player-info player-white">
+                <div>
+                    <strong>{{ game.white_player.username if game.white_player else 'Waiting...' }}</strong>
+                    <div>White</div>
+                </div>
+                <div id="whiteTime">∞</div>
+            </div>
+            
+            <div id="playerBlack" class="player-info player-black">
+                <div>
+                    <strong>{{ game.black_player.username if game.black_player else 'Waiting...' }}</strong>
+                    <div>Black</div>
+                </div>
+                <div id="blackTime">∞</div>
+            </div>
+            
+            <!-- Turn Indicator -->
+            <div id="turnInfo" style="text-align: center; margin: 20px 0; font-size: 18px;">
+                <strong>Turn: </strong><span id="currentTurn">White</span>
+            </div>
+            
+            <!-- Moves List -->
+            <div style="margin-top: 20px;">
+                <h3>Game Moves</h3>
+                <div id="movesList" class="moves-list">
+                    <div style="color: #666; font-style: italic;">No moves yet...</div>
+                </div>
+            </div>
+            
+            <!-- Game Details -->
+            <div style="margin-top: 20px; font-size: 14px; color: #666;">
+                <div><strong>Game ID:</strong> {{ game.id }}</div>
+                <div><strong>Status:</strong> {{ game.status }}</div>
+                <div><strong>Created:</strong> {{ game.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                {% if game.result %}
+                <div><strong>Result:</strong> {{ game.result }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game data from server
+        const gameData = {
+            id: parseInt("{{ game.id }}"),
+            status: "{{ game.status }}",
+            whitePlayer: "{{ game.white_player.username if game.white_player else '' }}",
+            blackPlayer: "{{ game.black_player.username if game.black_player else 'Waiting...' }}",
+            userId: parseInt("{{ user_id }}"),
+            whitePlayerId: parseInt("{{ game.player_white_id }}"),
+            blackPlayerId: "{{ game.player_black_id|default('null') }}" === "null" ? null : parseInt("{{ game.player_black_id }}"),
+            moves: "{{ game.moves or '' }}".split(' ').filter(m => m.length > 0)
+        };
+        
+        // Global variables
+        let socket = null;
+        let board = null;
+        let chessGame = null; // Chess.js game instance
+        let userColor = null;
+        let isGameActive = false;
+        let lastMove = null;
+        
+        // Initialize when page loads
+        $(document).ready(function() {
+            userColor = (gameData.whitePlayerId === gameData.userId) ? 'white' : 'black';
+            initializeSocket();
+            initializeGame();
+        });
+        
+        function initializeSocket() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('Connected to server');
+                // Join the game room
+                socket.emit('join_game', { game_id: gameData.id });
+            });
+            
+            socket.on('game_joined', function(data) {
+                updateGameState(data);
+                updateStatus('Connected - Game Active');
+                isGameActive = true;
+            });
+            
+            socket.on('move_made', function(data) {
+                handleMoveUpdate(data);
+            });
+            
+            socket.on('player_joined', function(data) {
+                updateStatus('Player joined: ' + data.username);
+                // Update player info if needed
+            });
+            
+            socket.on('error', function(data) {
+                alert('Error: ' + data.message);
+                console.error('Socket error:', data);
+            });
+            
+            socket.on('disconnect', function() {
+                updateStatus('Disconnected from server');
+                isGameActive = false;
+            });
+        }
+        
+        function initializeGame() {
+            // Initialize Chess.js
+            chessGame = new Chess();
+            
+            // Replay existing moves
+            if (gameData.moves && gameData.moves.length > 0) {
+                gameData.moves.forEach(move => {
+                    try {
+                        chessGame.move(move);
+                    } catch (e) {
+                        console.error('Invalid move in history:', move, e);
+                    }
+                });
+            }
+            
+            // Initialize chessboard
+            const config = {
+                draggable: true,
+                position: chessGame.fen(),
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+                onDrop: onDrop,
+                onMouseoverSquare: onMouseoverSquare,
+                onMouseoutSquare: onMouseoutSquare,
+                orientation: userColor
+            };
+            
+            board = Chessboard('board', config);
+            
+            // Update UI
+            updateMovesList();
+            updateTurnIndicator();
+            highlightLastMove();
+            
+            // Enable controls if game is active
+            if (gameData.status === 'active') {
+                document.getElementById('drawBtn').disabled = false;
+                document.getElementById('resignBtn').disabled = false;
+            }
+        }
+        
+        function onDrop(source, target) {
+            // Check if game is active
+            if (!isGameActive || gameData.status !== 'active') {
+                return 'snapback';
+            }
+            
+            // Check if it's the user's turn
+            const isUserTurn = (chessGame.turn() === 'w' && userColor === 'white') || 
+                              (chessGame.turn() === 'b' && userColor === 'black');
+            
+            if (!isUserTurn) {
+                return 'snapback';
+            }
+            
+            // Try to make the move locally for validation
+            const move = chessGame.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Always promote to queen for simplicity
+            });
+            
+            // If move is illegal, snap back
+            if (move === null) {
+                return 'snapback';
+            }
+            
+            // Send move to server
+            const moveUci = source + target + (move.promotion || '');
+            socket.emit('make_move', {
+                game_id: gameData.id,
+                move: moveUci
+            });
+            
+            // Undo the local move - server will confirm it
+            chessGame.undo();
+            
+            return true;
+        }
+        
+        function handleMoveUpdate(data) {
+            // Update local game state
+            chessGame.load(data.fen);
+            board.position(data.fen);
+            
+            // Store last move for highlighting
+            lastMove = data.move;
+            
+            // Update UI
+            updateMovesList();
+            updateTurnIndicator();
+            highlightLastMove();
+            
+            // Check for game end
+            if (data.status === 'finished') {
+                isGameActive = false;
+                document.getElementById('drawBtn').disabled = true;
+                document.getElementById('resignBtn').disabled = true;
+                
+                let message = 'Game Over: ';
+                if (data.result === '1-0') {
+                    message += 'White wins!';
+                } else if (data.result === '0-1') {
+                    message += 'Black wins!';
+                } else {
+                    message += 'Draw!';
+                }
+                updateStatus(message);
+                setTimeout(() => alert(message), 500);
+            }
+        }
+        
+        function updateGameState(data) {
+            if (data.fen) {
+                chessGame.load(data.fen);
+                board.position(data.fen);
+            }
+            updateMovesList();
+            updateTurnIndicator();
+        }
+        
+        function onMouseoverSquare(square, piece) {
+            if (!isGameActive || gameData.status !== 'active') return;
+            
+            // Check if it's user's turn
+            const isUserTurn = (chessGame.turn() === 'w' && userColor === 'white') || 
+                              (chessGame.turn() === 'b' && userColor === 'black');
+            
+            if (!isUserTurn) return;
+            
+            // Get possible moves for this square
+            const moves = chessGame.moves({
+                square: square,
+                verbose: true
+            });
+            
+            if (moves.length === 0) return;
+            
+            // Highlight the square they moused over
+            highlightSquare(square, 'highlight');
+            
+            // Highlight possible destination squares
+            for (let move of moves) {
+                highlightSquare(move.to, 'possible-move');
+            }
+        }
+        
+        function onMouseoutSquare(square, piece) {
+            removeHighlights();
+            highlightLastMove(); // Restore last move highlighting
+        }
+        
+        function highlightSquare(square, cssClass = 'highlight') {
+            const $square = $('#board .square-' + square);
+            $square.addClass(cssClass);
+        }
+        
+        function removeHighlights() {
+            $('#board .square-55d63').removeClass('highlight possible-move');
+        }
+        
+        function highlightLastMove() {
+            if (!lastMove) return;
+            
+            $('#board .square-55d63').removeClass('last-move');
+            
+            const from = lastMove.substring(0, 2);
+            const to = lastMove.substring(2, 4);
+            
+            highlightSquare(from, 'last-move');
+            highlightSquare(to, 'last-move');
+        }
+        
+        function updateMovesList() {
+            const movesEl = document.getElementById('movesList');
+            const history = chessGame.history({ verbose: true });
+            
+            if (history.length === 0) {
+                movesEl.innerHTML = '<div style="color: #666; font-style: italic;">No moves yet...</div>';
+                return;
+            }
+            
+            let movesHtml = '';
+            for (let i = 0; i < history.length; i += 2) {
+                const moveNumber = Math.floor(i / 2) + 1;
+                const whiteMove = history[i];
+                const blackMove = history[i + 1];
+                
+                movesHtml += `
+                    <div class="move-pair">
+                        <span class="move-number">${moveNumber}.</span>
+                        ${whiteMove.san}
+                        ${blackMove ? blackMove.san : ''}
+                    </div>
+                `;
+            }
+            
+            movesEl.innerHTML = movesHtml;
+            movesEl.scrollTop = movesEl.scrollHeight;
+        }
+        
+        function updateTurnIndicator() {
+            const turnEl = document.getElementById('currentTurn');
+            const whitePlayerEl = document.getElementById('playerWhite');
+            const blackPlayerEl = document.getElementById('playerBlack');
+            
+            const currentTurn = chessGame.turn() === 'w' ? 'White' : 'Black';
+            turnEl.textContent = currentTurn;
+            
+            // Update player highlighting
+            whitePlayerEl.classList.remove('current-turn');
+            blackPlayerEl.classList.remove('current-turn');
+            
+            if (chessGame.turn() === 'w') {
+                whitePlayerEl.classList.add('current-turn');
+            } else {
+                blackPlayerEl.classList.add('current-turn');
+            }
+        }
+        
+        function updateStatus(message) {
+            document.getElementById('gameStatus').textContent = message;
+        }
+        
+        // Game control functions
+        function offerDraw() {
+            if (confirm('Offer a draw to your opponent?')) {
+                // TODO: Implement draw offer
+                alert('Draw offer feature not implemented yet');
+            }
+        }
+        
+        function resignGame() {
+            if (confirm('Are you sure you want to resign? This will end the game.')) {
+                // TODO: Implement resignation
+                alert('Resignation feature not implemented yet');
+            }
+        }
+        
+        function leaveGame() {
+            if (confirm('Are you sure you want to leave the game?')) {
+                socket.emit('leave_game', { game_id: gameData.id });
+                window.location.href = '/';
+            }
+        }
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', function() {
+            if (socket && isGameActive) {
+                socket.emit('leave_game', { game_id: gameData.id });
+            }
+        });
+    </script>
+</body>
+</html>

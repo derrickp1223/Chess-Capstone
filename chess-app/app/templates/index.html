@@ -1,38 +1,584 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess Game</title>
-  
+    
     <!-- jQuery (required by chessboard.js) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-  
-    <!-- Chessboard.js CSS & JS from cdnjs -->
-    <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
+    
+    <!-- Chessboard.js CSS & JS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-  
-    <!-- Socket.IO (optional: keep CDN for dev) -->
+    
+    <!-- Chess.js for move validation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    
+    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  </head>
-  
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .auth-section, .game-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .auth-section {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .game-section {
+            flex: 2;
+            min-width: 600px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input[type="text"], input[type="email"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+        
+        .success {
+            color: green;
+            margin-top: 10px;
+        }
+        
+        .game-info {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        #board {
+            margin: 20px 0;
+        }
+        
+        .game-controls {
+            margin-top: 20px;
+        }
+        
+        .moves-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+
 <body>
-    <h1>Web Chess Game</h1>
-    <div id="board" style="width: 500px;"></div>
+    <h1>🏰 Web Chess Game</h1>
+    
+    <div class="container">
+        <!-- Authentication Section -->
+        <div class="auth-section" id="authSection">
+            <div id="loginForm">
+                <h2>Login</h2>
+                <div class="form-group">
+                    <label for="loginUsername">Username:</label>
+                    <input type="text" id="loginUsername" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password:</label>
+                    <input type="password" id="loginPassword" required>
+                </div>
+                <button onclick="login()">Login</button>
+                <button onclick="showSignup()">Sign Up</button>
+                <div id="loginMessage"></div>
+            </div>
+            
+            <div id="signupForm" class="hidden">
+                <h2>Sign Up</h2>
+                <div class="form-group">
+                    <label for="signupUsername">Username:</label>
+                    <input type="text" id="signupUsername" required>
+                </div>
+                <div class="form-group">
+                    <label for="signupEmail">Email:</label>
+                    <input type="email" id="signupEmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="signupPassword">Password:</label>
+                    <input type="password" id="signupPassword" required>
+                </div>
+                <button onclick="signup()">Sign Up</button>
+                <button onclick="showLogin()">Back to Login</button>
+                <div id="signupMessage"></div>
+            </div>
+            
+            <div id="userSection" class="hidden">
+                <h2>Welcome, <span id="username"></span>!</h2>
+                <div class="game-controls">
+                    <button onclick="findGame()" id="findGameBtn">Find Game</button>
+                    <button onclick="logout()">Logout</button>
+                </div>
+                <div id="queueMessage"></div>
+            </div>
+        </div>
+        
+        <!-- Game Section -->
+        <div class="game-section" id="gameSection" class="hidden">
+            <div class="game-info" id="gameInfo">
+                <div class="status" id="gameStatus">Not connected</div>
+                <div id="playerInfo"></div>
+                <div id="turnInfo"></div>
+            </div>
+            
+            <div id="board" style="width: 500px;"></div>
+            
+            <div class="game-controls">
+                <button onclick="resignGame()" id="resignBtn" disabled>Resign</button>
+                <button onclick="leaveGame()" id="leaveBtn" disabled>Leave Game</button>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <h3>Moves</h3>
+                <div id="movesList" class="moves-list"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
-        const socket = io();
-        const room = 'room1';
-        socket.emit('join', { room });
-        const board = Chessboard('board', {
-            draggable: true,
-            position: 'start',
-            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
-            onDrop: (source, target) => {
-                socket.emit('move', { room, move: source + target });
-            }
+        // Global variables
+        let socket = null;
+        let currentUser = null;
+        let currentGame = null;
+        let board = null;
+        let game = null; // Chess.js game instance
+        let userColor = null;
+        
+        // Initialize
+        $(document).ready(function() {
+            // Check if user is already logged in (from server-side template)
+            {% if user %}
+            currentUser = {
+                id: {{ user.id }},
+                username: "{{ user.username }}"
+            };
+            showUserSection();
+            {% endif %}
+            
+            // Initialize Socket.IO
+            initializeSocket();
         });
-        socket.on('board_state', fen => board.position(fen));
-        socket.on('invalid_move', () => alert("Invalid move!"));
+        
+        function initializeSocket() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('Connected to server');
+            });
+            
+            socket.on('game_joined', function(data) {
+                currentGame = data;
+                userColor = data.color;
+                initializeGame(data);
+            });
+            
+            socket.on('move_made', function(data) {
+                updateGameState(data);
+            });
+            
+            socket.on('error', function(data) {
+                alert('Error: ' + data.message);
+            });
+            
+            socket.on('player_joined', function(data) {
+                updatePlayerInfo();
+            });
+        }
+        
+        // Authentication functions
+        async function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const response = await fetch('http://localhost:5002/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentUser = data.user;
+                    showMessage('loginMessage', data.message, 'success');
+                    showUserSection();
+                } else {
+                    showMessage('loginMessage', data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('loginMessage', 'Network error', 'error');
+            }
+        }
+        
+        async function signup() {
+            const username = document.getElementById('signupUsername').value;
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+            
+            try {
+                const response = await fetch('http://localhost:5002/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentUser = data.user;
+                    showMessage('signupMessage', data.message, 'success');
+                    showUserSection();
+                } else {
+                    showMessage('signupMessage', data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('signupMessage', 'Network error', 'error');
+            }
+        }
+        
+        async function logout() {
+            try {
+                await fetch('/logout', { method: 'POST' });
+                currentUser = null;
+                currentGame = null;
+                showAuthSection();
+                if (board) {
+                    board.destroy();
+                    board = null;
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        }
+        
+        async function findGame() {
+            const btn = document.getElementById('findGameBtn');
+            btn.disabled = true;
+            btn.textContent = 'Searching...';
+            
+            try {
+                const response = await fetch('/find-game', { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.game_id) {
+                        // Game found immediately
+                        showMessage('queueMessage', data.message, 'success');
+                        joinGame(data.game_id);
+                    } else {
+                        // Added to queue
+                        showMessage('queueMessage', data.message, 'success');
+                        // TODO: Implement polling or WebSocket notification for when game is found
+                    }
+                } else {
+                    showMessage('queueMessage', data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('queueMessage', 'Network error', 'error');
+            }
+            
+            btn.disabled = false;
+            btn.textContent = 'Find Game';
+        }
+        
+        function joinGame(gameId) {
+            socket.emit('join_game', { game_id: gameId });
+            document.getElementById('gameSection').classList.remove('hidden');
+        }
+        
+        function initializeGame(gameData) {
+            // Initialize Chess.js
+            game = new Chess();
+            
+            // Replay moves
+            if (gameData.moves && gameData.moves.length > 0) {
+                gameData.moves.forEach(move => {
+                    game.move(move);
+                });
+            }
+            
+            // Initialize chessboard
+            const config = {
+                draggable: true,
+                position: gameData.fen,
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+                onDrop: onDrop,
+                onMouseoverSquare: onMouseoverSquare,
+                onMouseoutSquare: onMouseoutSquare,
+                orientation: userColor
+            };
+            
+            board = Chessboard('board', config);
+            
+            updateGameInfo(gameData);
+            updateMovesList();
+            
+            // Enable game controls
+            document.getElementById('resignBtn').disabled = false;
+            document.getElementById('leaveBtn').disabled = false;
+        }
+        
+        function onDrop(source, target) {
+            // Check if it's the user's turn
+            const isUserTurn = (game.turn() === 'w' && userColor === 'white') || 
+                              (game.turn() === 'b' && userColor === 'black');
+            
+            if (!isUserTurn) {
+                return 'snapback';
+            }
+            
+            // Try to make the move
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Always promote to queen for simplicity
+            });
+            
+            // If move is illegal, snap back
+            if (move === null) return 'snapback';
+            
+            // Send move to server
+            socket.emit('make_move', {
+                game_id: currentGame.game_id,
+                move: move.from + move.to + (move.promotion || '')
+            });
+            
+            // The move will be confirmed by the server response
+            game.undo(); // Undo locally until server confirms
+            
+            return true;
+        }
+        
+        function onMouseoverSquare(square, piece) {
+            // Highlight possible moves
+            if (!game || !board) return;
+            
+            const isUserTurn = (game.turn() === 'w' && userColor === 'white') || 
+                              (game.turn() === 'b' && userColor === 'black');
+            
+            if (!isUserTurn) return;
+            
+            const moves = game.moves({
+                square: square,
+                verbose: true
+            });
+            
+            if (moves.length === 0) return;
+            
+            // Highlight the square they moused over
+            highlightSquare(square);
+            
+            // Highlight the possible squares for this piece
+            for (let i = 0; i < moves.length; i++) {
+                highlightSquare(moves[i].to);
+            }
+        }
+        
+        function onMouseoutSquare(square, piece) {
+            removeHighlights();
+        }
+        
+        function highlightSquare(square) {
+            const $square = $('#board .square-' + square);
+            $square.addClass('highlight');
+        }
+        
+        function removeHighlights() {
+            $('#board .square-55d63').removeClass('highlight');
+        }
+        
+        function updateGameState(data) {
+            // Update local game state
+            game.load(data.fen);
+            board.position(data.fen);
+            
+            updateGameInfo({
+                ...currentGame,
+                turn: data.turn,
+                status: data.status,
+                result: data.result
+            });
+            
+            updateMovesList();
+            
+            // Check for game end
+            if (data.status === 'finished') {
+                document.getElementById('resignBtn').disabled = true;
+                let message = 'Game Over: ';
+                if (data.result === '1-0') {
+                    message += 'White wins!';
+                } else if (data.result === '0-1') {
+                    message += 'Black wins!';
+                } else {
+                    message += 'Draw!';
+                }
+                alert(message);
+            }
+        }
+        
+        function updateGameInfo(gameData) {
+            const statusEl = document.getElementById('gameStatus');
+            const playerInfoEl = document.getElementById('playerInfo');
+            const turnInfoEl = document.getElementById('turnInfo');
+            
+            statusEl.textContent = `Game Status: ${gameData.status}`;
+            playerInfoEl.innerHTML = `
+                <strong>White:</strong> ${gameData.white_player}<br>
+                <strong>Black:</strong> ${gameData.black_player}<br>
+                <strong>You are:</strong> ${userColor}
+            `;
+            
+            const isUserTurn = (gameData.turn === userColor);
+            turnInfoEl.innerHTML = `<strong>Turn:</strong> ${gameData.turn} ${isUserTurn ? '(Your turn!)' : ''}`;
+        }
+        
+        function updateMovesList() {
+            const movesEl = document.getElementById('movesList');
+            const history = game.history({ verbose: true });
+            
+            let movesHtml = '';
+            for (let i = 0; i < history.length; i += 2) {
+                const moveNumber = Math.floor(i / 2) + 1;
+                const whiteMove = history[i];
+                const blackMove = history[i + 1];
+                
+                movesHtml += `<div>${moveNumber}. ${whiteMove.san} ${blackMove ? blackMove.san : ''}</div>`;
+            }
+            
+            movesEl.innerHTML = movesHtml;
+            movesEl.scrollTop = movesEl.scrollHeight;
+        }
+        
+        function resignGame() {
+            if (confirm('Are you sure you want to resign?')) {
+                // TODO: Implement resignation
+                alert('Resignation feature not implemented yet');
+            }
+        }
+        
+        function leaveGame() {
+            if (confirm('Are you sure you want to leave the game?')) {
+                socket.emit('leave_game', { game_id: currentGame.game_id });
+                document.getElementById('gameSection').classList.add('hidden');
+                document.getElementById('resignBtn').disabled = true;
+                document.getElementById('leaveBtn').disabled = true;
+                currentGame = null;
+                if (board) {
+                    board.destroy();
+                    board = null;
+                }
+            }
+        }
+        
+        // UI Helper functions
+        function showMessage(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = type;
+        }
+        
+        function showLogin() {
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('signupForm').classList.add('hidden');
+        }
+        
+        function showSignup() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('signupForm').classList.remove('hidden');
+        }
+        
+        function showUserSection() {
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('userSection').classList.remove('hidden');
+            document.getElementById('username').textContent = currentUser.username;
+        }
+        
+        function showAuthSection() {
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('userSection').classList.add('hidden');
+            document.getElementById('gameSection').classList.add('hidden');
+            showLogin();
+        }
+        
+        // Add CSS for square highlighting
+        const style = document.createElement('style');
+        style.textContent = `
+            .highlight {
+                background-color: yellow !important;
+                opacity: 0.6;
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>
