@@ -15,7 +15,7 @@ def create_app():
 
     # PostgreSQL connection - use environment variables for security
     database_url = os.environ.get('DATABASE_URL', 
-                                'postgresql://chess_user:Nelson1984.@localhost:5433/chess_db')
+                                'postgresql://chess_user:Amber1984.@localhost/chess_capstone')
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
