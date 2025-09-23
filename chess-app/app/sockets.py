@@ -1,13 +1,14 @@
 import chess
 from flask_socketio import emit, join_room, leave_room
 from flask import session, request
-from . import socketio
-from .models import db, Game, User
+from .models import db, Game, User, WaitingQueue
 
 # In-memory board objects for active games
 active_boards = {}
 # Track connected users per room
 room_users = {}
+# Track users in matchmaking queue (socket_id -> user_id)
+queue_sockets = {}
 
 def register_sockets(socketio):
 
@@ -18,12 +19,107 @@ def register_sockets(socketio):
     @socketio.on('disconnect')
     def handle_disconnect():
         print(f"Client disconnected: {request.sid}")
+        
+        # Remove from matchmaking queue if they were waiting
+        if request.sid in queue_sockets:
+            user_id = queue_sockets[request.sid]
+            # Remove from database queue
+            queue_entry = WaitingQueue.query.filter_by(user_id=user_id).first()
+            if queue_entry:
+                db.session.delete(queue_entry)
+                db.session.commit()
+            del queue_sockets[request.sid]
+        
         # Clean up room_users if needed
         for room_id in list(room_users.keys()):
             if request.sid in room_users[room_id]:
                 room_users[room_id].discard(request.sid)
                 if not room_users[room_id]:
                     del room_users[room_id]
+
+    @socketio.on('join_matchmaking')
+    def handle_join_matchmaking(data=None):
+        """Handle joining the matchmaking queue via WebSocket"""
+        # Get user_id from the data passed from frontend
+        user_id = data.get('user_id') if data else session.get('user_id')
+        if not user_id:
+            emit('error', {'message': 'You must be logged in to join matchmaking.'})
+            return
+
+        # Check if user is already in queue
+        existing_queue = WaitingQueue.query.filter_by(user_id=user_id).first()
+        if existing_queue:
+            emit('matchmaking_status', {'status': 'already_in_queue'})
+            return
+
+        # Check if there's someone waiting
+        waiting_player = WaitingQueue.query.filter(WaitingQueue.user_id != user_id).first()
+        
+        if waiting_player:
+            # Create game with waiting player
+            game = Game(
+                player_white_id=waiting_player.user_id,
+                player_black_id=user_id,
+                status='active'
+            )
+            db.session.add(game)
+            
+            # Remove both players from queue
+            db.session.delete(waiting_player)
+            db.session.commit()
+            
+            # Remove waiting player from socket queue tracking
+            waiting_socket_id = None
+            for socket_id, queued_user_id in queue_sockets.items():
+                if queued_user_id == waiting_player.user_id:
+                    waiting_socket_id = socket_id
+                    break
+            
+            if waiting_socket_id:
+                del queue_sockets[waiting_socket_id]
+                # Notify waiting player
+                emit('game_found', {
+                    'game_id': game.id,
+                    'color': 'white',
+                    'opponent': User.query.get(user_id).username
+                }, to=waiting_socket_id)
+            
+            # Notify current player
+            emit('game_found', {
+                'game_id': game.id,
+                'color': 'black',
+                'opponent': User.query.get(waiting_player.user_id).username
+            })
+            
+        else:
+            # Add to queue
+            queue_entry = WaitingQueue(user_id=user_id)
+            db.session.add(queue_entry)
+            db.session.commit()
+            
+            # Track socket for this user
+            queue_sockets[request.sid] = user_id
+            
+            emit('matchmaking_status', {'status': 'waiting'})
+
+    @socketio.on('leave_matchmaking')
+    def handle_leave_matchmaking(data=None):
+        """Handle leaving the matchmaking queue"""
+        user_id = data.get('user_id') if data else session.get('user_id')
+        if not user_id:
+            return
+
+        # Remove from database queue
+        queue_entry = WaitingQueue.query.filter_by(user_id=user_id).first()
+        if queue_entry:
+            db.session.delete(queue_entry)
+            db.session.commit()
+
+        # Remove from socket tracking
+        if request.sid in queue_sockets:
+            del queue_sockets[request.sid]
+
+        emit('matchmaking_status', {'status': 'left_queue'})
 
     @socketio.on('join_game')
     def handle_join_game(data):

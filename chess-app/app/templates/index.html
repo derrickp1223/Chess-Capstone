@@ -129,6 +129,49 @@
             padding: 10px;
             background-color: #f9f9f9;
         }
+        
+        .matchmaking-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .waiting {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .found {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .cancel-btn {
+            background-color: #dc3545 !important;
+        }
+        
+        .cancel-btn:hover {
+            background-color: #c82333 !important;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ccc;
+            border-top: 2px solid #333;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 
@@ -175,15 +218,17 @@
             <div id="userSection" class="hidden">
                 <h2>Welcome, <span id="username"></span>!</h2>
                 <div class="game-controls">
-                    <button onclick="findGame()" id="findGameBtn">Find Game</button>
+                    <button onclick="findGame()" id="findGameBtn">🎯 Find Game</button>
+                    <button onclick="cancelMatchmaking()" id="cancelBtn" class="cancel-btn hidden">Cancel Search</button>
+                    <button onclick="viewMyGames()" id="myGamesBtn">📋 My Games</button>
                     <button onclick="logout()">Logout</button>
                 </div>
-                <div id="queueMessage"></div>
+                <div id="matchmakingStatus" class="matchmaking-status hidden"></div>
             </div>
         </div>
         
         <!-- Game Section -->
-        <div class="game-section" id="gameSection" class="hidden">
+        <div class="game-section hidden" id="gameSection">
             <div class="game-info" id="gameInfo">
                 <div class="status" id="gameStatus">Not connected</div>
                 <div id="playerInfo"></div>
@@ -212,6 +257,7 @@
         let board = null;
         let game = null; // Chess.js game instance
         let userColor = null;
+        let inMatchmakingQueue = false;
         
         // Initialize
         $(document).ready(function() {
@@ -235,6 +281,23 @@
                 console.log('Connected to server');
             });
             
+            socket.on('disconnect', function() {
+                console.log('Disconnected from server');
+                if (inMatchmakingQueue) {
+                    updateMatchmakingStatus('Disconnected - please refresh and try again', 'error');
+                }
+            });
+            
+            // Matchmaking events
+            socket.on('matchmaking_status', function(data) {
+                handleMatchmakingStatus(data);
+            });
+            
+            socket.on('game_found', function(data) {
+                handleGameFound(data);
+            });
+            
+            // Game events
             socket.on('game_joined', function(data) {
                 currentGame = data;
                 userColor = data.color;
@@ -247,6 +310,7 @@
             
             socket.on('error', function(data) {
                 alert('Error: ' + data.message);
+                console.error('Socket error:', data);
             });
             
             socket.on('player_joined', function(data) {
@@ -260,9 +324,10 @@
             const password = document.getElementById('loginPassword').value;
             
             try {
-                const response = await fetch('http://localhost:5002/login', {
+                const response = await fetch('/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify({ username, password })
                 });
                 
@@ -286,9 +351,10 @@
             const password = document.getElementById('signupPassword').value;
             
             try {
-                const response = await fetch('http://localhost:5002/signup', {
+                const response = await fetch('/signup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify({ username, email, password })
                 });
                 
@@ -308,9 +374,13 @@
         
         async function logout() {
             try {
+                if (inMatchmakingQueue) {
+                    socket.emit('leave_matchmaking', { user_id: currentUser.id });
+                }
                 await fetch('/logout', { method: 'POST' });
                 currentUser = null;
                 currentGame = null;
+                inMatchmakingQueue = false;
                 showAuthSection();
                 if (board) {
                     board.destroy();
@@ -321,34 +391,81 @@
             }
         }
         
-        async function findGame() {
-            const btn = document.getElementById('findGameBtn');
-            btn.disabled = true;
-            btn.textContent = 'Searching...';
-            
-            try {
-                const response = await fetch('/find-game', { method: 'POST' });
-                const data = await response.json();
-                
-                if (response.ok) {
-                    if (data.game_id) {
-                        // Game found immediately
-                        showMessage('queueMessage', data.message, 'success');
-                        joinGame(data.game_id);
-                    } else {
-                        // Added to queue
-                        showMessage('queueMessage', data.message, 'success');
-                        // TODO: Implement polling or WebSocket notification for when game is found
-                    }
-                } else {
-                    showMessage('queueMessage', data.error, 'error');
-                }
-            } catch (error) {
-                showMessage('queueMessage', 'Network error', 'error');
+        // Matchmaking functions
+        function findGame() {
+            if (!socket || !socket.connected) {
+                alert('Not connected to server. Please refresh the page.');
+                return;
             }
             
-            btn.disabled = false;
-            btn.textContent = 'Find Game';
+            if (!currentUser) {
+                alert('You must be logged in to find a game.');
+                return;
+            }
+            
+            socket.emit('join_matchmaking', { user_id: currentUser.id });
+            inMatchmakingQueue = true;
+            
+            // Update UI
+            document.getElementById('findGameBtn').classList.add('hidden');
+            document.getElementById('cancelBtn').classList.remove('hidden');
+        }
+        
+        function cancelMatchmaking() {
+            socket.emit('leave_matchmaking', { user_id: currentUser.id });
+            inMatchmakingQueue = false;
+            
+            // Update UI
+            document.getElementById('findGameBtn').classList.remove('hidden');
+            document.getElementById('cancelBtn').classList.add('hidden');
+            document.getElementById('matchmakingStatus').classList.add('hidden');
+        }
+        
+        function handleMatchmakingStatus(data) {
+            const statusEl = document.getElementById('matchmakingStatus');
+            statusEl.classList.remove('hidden');
+            
+            switch(data.status) {
+                case 'waiting':
+                    updateMatchmakingStatus('🔍 Searching for opponent...', 'waiting');
+                    break;
+                case 'already_in_queue':
+                    updateMatchmakingStatus('You are already in the matchmaking queue', 'waiting');
+                    break;
+                case 'left_queue':
+                    statusEl.classList.add('hidden');
+                    break;
+            }
+        }
+        
+        function handleGameFound(data) {
+            inMatchmakingQueue = false;
+            updateMatchmakingStatus(`🎉 Game found! You are playing as ${data.color} vs ${data.opponent}`, 'found');
+            
+            // Update UI
+            document.getElementById('findGameBtn').classList.remove('hidden');
+            document.getElementById('cancelBtn').classList.add('hidden');
+            
+            // Join the game after a short delay to show the success message
+            setTimeout(() => {
+                joinGame(data.game_id);
+                document.getElementById('matchmakingStatus').classList.add('hidden');
+            }, 2000);
+        }
+        
+        function updateMatchmakingStatus(message, type) {
+            const statusEl = document.getElementById('matchmakingStatus');
+            
+            if (type === 'waiting') {
+                statusEl.className = 'matchmaking-status waiting';
+                statusEl.innerHTML = `<span class="spinner"></span>${message}`;
+            } else if (type === 'found') {
+                statusEl.className = 'matchmaking-status found';
+                statusEl.textContent = message;
+            } else {
+                statusEl.className = 'matchmaking-status error';
+                statusEl.textContent = message;
+            }
         }
         
         function joinGame(gameId) {
@@ -356,6 +473,26 @@
             document.getElementById('gameSection').classList.remove('hidden');
         }
         
+        async function viewMyGames() {
+            try {
+                const response = await fetch('/my-games');
+                const data = await response.json();
+                
+                if (response.ok && data.games) {
+                    let gamesList = 'Your Recent Games:\n\n';
+                    data.games.slice(0, 10).forEach(game => {
+                        gamesList += `Game #${game.id} - ${game.status} (${game.my_color}) vs ${game.opponent}\n`;
+                    });
+                    alert(gamesList);
+                } else {
+                    alert('Could not load your games');
+                }
+            } catch (error) {
+                alert('Error loading games');
+            }
+        }
+        
+        // Game functions
         function initializeGame(gameData) {
             // Initialize Chess.js
             game = new Chess();
@@ -363,7 +500,11 @@
             // Replay moves
             if (gameData.moves && gameData.moves.length > 0) {
                 gameData.moves.forEach(move => {
-                    game.move(move);
+                    try {
+                        game.move(move);
+                    } catch (e) {
+                        console.error('Invalid move in history:', move, e);
+                    }
                 });
             }
             
@@ -506,6 +647,11 @@
             const movesEl = document.getElementById('movesList');
             const history = game.history({ verbose: true });
             
+            if (history.length === 0) {
+                movesEl.innerHTML = '<div style="color: #666; font-style: italic;">No moves yet...</div>';
+                return;
+            }
+            
             let movesHtml = '';
             for (let i = 0; i < history.length; i += 2) {
                 const moveNumber = Math.floor(i / 2) + 1;
@@ -558,8 +704,10 @@
         }
         
         function showUserSection() {
-            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('authSection').classList.remove('hidden');
             document.getElementById('userSection').classList.remove('hidden');
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('signupForm').classList.add('hidden');
             document.getElementById('username').textContent = currentUser.username;
         }
         
@@ -569,6 +717,13 @@
             document.getElementById('gameSection').classList.add('hidden');
             showLogin();
         }
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', function() {
+            if (socket && inMatchmakingQueue && currentUser) {
+                socket.emit('leave_matchmaking', { user_id: currentUser.id });
+            }
+        });
         
         // Add CSS for square highlighting
         const style = document.createElement('style');
