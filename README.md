@@ -40,3 +40,7 @@ Make sure you have:
    ```bash
    git clone https://github.com/derrickp1223/Chess-Capstone.git
    cd chess-app
+
+2. Install requirements:
+   ```bash
+   pip install -r requirements.txt
